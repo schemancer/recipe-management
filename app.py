@@ -9,35 +9,59 @@ st.set_page_config(page_title="レシピ＆お買い物マネージャー", layo
 # ==========================================
 GAS_URL = "https://script.google.com/macros/s/AKfycbxPyDnc_ey2LLrGd9TZsRz6Q46zq2UXkNNohB6fozgijvGQtGahsmMXfHI3289-PRL9mg/exec"
 
+# --- 共通関数 ---
 def load_data():
-    """GAS経由でスプレッドシートからデータを読み込む"""
     try:
         response = requests.get(GAS_URL)
-        data = response.json()
-        if data:
-            return data
+        if response.status_code == 200:
+            data = response.json()
+            if data:
+                return data
+        else:
+            st.error(f"読み込みエラー: {response.status_code}")
     except Exception as e:
         st.error(f"データの読み込みに失敗しました: {e}")
     return None
 
 def save_data():
-    """GAS経由でスプレッドシートにデータを保存する"""
     data_to_save = {
         "recipes": st.session_state.recipes,
         "inventory": st.session_state.inventory
     }
     try:
-        # データをJSON文字列に変換して送信
-        requests.post(GAS_URL, data=json.dumps(data_to_save, ensure_ascii=False))
+        response = requests.post(
+            GAS_URL, 
+            json=data_to_save,
+            headers={'Content-Type': 'application/json'}
+        )
+        if response.status_code != 200:
+            st.error(f"保存エラー: {response.status_code}")
     except Exception as e:
         st.error(f"データの保存に失敗しました: {e}")
+
+def parse_ingredients(raw_text):
+    """テキストエリアの文字列をリストに変換する関数"""
+    result = []
+    for line in raw_text.strip().split('\n'):
+        if line.strip():
+            parts = line.split(',')
+            name = parts[0].strip()
+            amount = parts[1].strip() if len(parts) > 1 else "適量"
+            result.append({"name": name, "amount": amount})
+    return result
+
+def unparse_ingredients(ing_list):
+    """リストをテキストエリア表示用の文字列に戻す関数"""
+    lines = []
+    for ing in ing_list:
+        lines.append(f"{ing['name']}, {ing['amount']}")
+    return "\n".join(lines)
 
 # --- セッションステートの初期化 ---
 if 'initialized' not in st.session_state:
     st.info("🔄 クラウドデータベース（スプレッドシート）と通信中...")
     saved_data = load_data()
     
-    # スプレッドシートにデータがある場合は復元、ない場合は初期データを入れる
     if saved_data and "recipes" in saved_data:
         st.session_state.recipes = saved_data.get("recipes", [])
         st.session_state.inventory = saved_data.get("inventory", {})
@@ -62,15 +86,18 @@ if 'initialized' not in st.session_state:
             "醤油": True, "みりん": False, "酒": True, "生姜（チューブ）": False
         }
     st.session_state.initialized = True
-    st.rerun() # 読み込み完了後に画面をリフレッシュ
+    st.rerun()
 
 # ---------------------------------------------
-# 画面の表示レイアウト（前回から変更なし）
+# 画面の表示レイアウト
 # ---------------------------------------------
 st.title("🍳 レシピ＆お買い物マネージャー")
 
 tab1, tab2, tab3 = st.tabs(["レシピ一覧（買い物リスト）", "レシピの登録", "調味料の在庫管理"])
 
+# ==========================================
+# タブ1: レシピ一覧（スーパーで見る画面）
+# ==========================================
 with tab1:
     st.header("今日作るレシピを選ぶ")
     if not st.session_state.recipes:
@@ -161,6 +188,70 @@ with tab1:
             st.subheader("📖 作り方")
             st.write(selected_recipe["instructions"])
 
+            # ---------------------------------------------
+            # ★新規追加：レシピの編集と削除エリア
+            # ---------------------------------------------
+            st.divider()
+            with st.expander("🛠️ このレシピを編集・削除する"):
+                st.subheader("✏️ レシピの編集")
+                with st.form(key=f"edit_form_{selected_recipe['name']}"):
+                    edit_name = st.text_input("レシピ名", value=selected_recipe["name"])
+                    
+                    # リストからテキスト入力用に変換
+                    foods_text = unparse_ingredients(selected_recipe["foods"])
+                    seasonings_text = unparse_ingredients(selected_recipe["seasonings"])
+                    
+                    st.markdown("---")
+                    edit_foods_raw = st.text_area("🥩 食材（毎回買うもの）", value=foods_text, height=100)
+                    edit_seasonings_raw = st.text_area("🧂 調味料（在庫管理するもの）", value=seasonings_text, height=100)
+                    st.markdown("---")
+                    edit_instructions = st.text_area("作り方", value=selected_recipe["instructions"], height=150)
+                    
+                    update_button = st.form_submit_button("更新する")
+                    
+                    if update_button:
+                        if edit_name:
+                            # 1. 入力内容を解析
+                            foods_list = parse_ingredients(edit_foods_raw)
+                            seasonings_list = parse_ingredients(edit_seasonings_raw)
+                            
+                            # 2. 該当レシピのインデックスを探して上書き
+                            target_idx = next(i for i, r in enumerate(st.session_state.recipes) if r["name"] == selected_recipe["name"])
+                            st.session_state.recipes[target_idx] = {
+                                "name": edit_name,
+                                "foods": foods_list,
+                                "seasonings": seasonings_list,
+                                "instructions": edit_instructions
+                            }
+                            
+                            # 3. 新しい調味料があれば在庫リストに追加
+                            for s in seasonings_list:
+                                if s["name"] not in st.session_state.inventory:
+                                    st.session_state.inventory[s["name"]] = False
+                            
+                            # 4. スプレッドシートに保存して画面をリロード
+                            save_data()
+                            st.success("レシピを更新しました！")
+                            st.rerun()
+                        else:
+                            st.error("レシピ名は必須です。")
+                
+                st.divider()
+                st.subheader("🗑️ レシピの削除")
+                st.warning("この操作は取り消せません。")
+                if st.button("このレシピを削除する", type="primary"):
+                    # 該当レシピを探して削除
+                    target_idx = next(i for i, r in enumerate(st.session_state.recipes) if r["name"] == selected_recipe["name"])
+                    st.session_state.recipes.pop(target_idx)
+                    
+                    # 保存してリロード
+                    save_data()
+                    st.success(f"「{selected_recipe['name']}」を削除しました。")
+                    st.rerun()
+
+# ==========================================
+# タブ2: レシピの登録
+# ==========================================
 with tab2:
     st.header("新しいレシピを登録")
     st.write("材料は **「名前, 分量」** とカンマで区切って、1行ずつ入力してください。")
@@ -178,16 +269,6 @@ with tab2:
         
         if submit_button:
             if new_name:
-                def parse_ingredients(raw_text):
-                    result = []
-                    for line in raw_text.strip().split('\n'):
-                        if line.strip():
-                            parts = line.split(',')
-                            name = parts[0].strip()
-                            amount = parts[1].strip() if len(parts) > 1 else "適量"
-                            result.append({"name": name, "amount": amount})
-                    return result
-                
                 foods_list = parse_ingredients(new_foods_raw)
                 seasonings_list = parse_ingredients(new_seasonings_raw)
                 
@@ -202,13 +283,15 @@ with tab2:
                     if s["name"] not in st.session_state.inventory:
                         st.session_state.inventory[s["name"]] = False
                 
-                # ★ここでスプレッドシートに保存！
                 save_data()
                         
                 st.success(f"「{new_name}」を登録し、データを保存しました！")
             else:
                 st.error("レシピ名は必須です。")
 
+# ==========================================
+# タブ3: 調味料の在庫管理
+# ==========================================
 with tab3:
     st.header("🏠 調味料の在庫管理")
     st.write("チェックが入っているものは「家にある」、外れているものは「切らしている（買う必要がある）」状態です。")
@@ -230,6 +313,5 @@ with tab3:
                 
                 if new_status != current_status:
                     st.session_state.inventory[ing] = new_status
-                    # ★ここでスプレッドシートに保存！
                     save_data()
                     st.rerun()
