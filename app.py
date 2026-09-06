@@ -2,10 +2,10 @@ import streamlit as st
 import requests
 import json
 
-st.set_page_config(page_title="レシピ＆お買い物マネージャー", layout="centered")
+st.set_page_config(page_title="レシピ＆お買い物マネージャー", layout="wide") # 画面を広く使えるように "wide" に変更
 
 # ==========================================
-# ⚠️ 注意: 以下の "" の中に、先ほど取得したGASのURLを貼り付けてください
+# ⚠️ 注意: 以下の "" の中に、GASのURLを貼り付けてください
 # ==========================================
 GAS_URL = "https://script.google.com/macros/s/AKfycbxPyDnc_ey2LLrGd9TZsRz6Q46zq2UXkNNohB6fozgijvGQtGahsmMXfHI3289-PRL9mg/exec"
 
@@ -55,7 +55,37 @@ def unparse_ingredients(ing_list):
         lines.append(f"{ing['name']}, {ing['amount']}")
     return "\n".join(lines)
 
+# --- コールバック関数（ボタンを押したときの自動入力処理） ---
+def add_food_to_draft(name):
+    current = st.session_state.draft_foods
+    if current and not current.endswith("\n"):
+        st.session_state.draft_foods += f"\n{name}, "
+    elif current:
+        st.session_state.draft_foods += f"{name}, "
+    else:
+        st.session_state.draft_foods = f"{name}, "
+
+def add_seasoning_to_draft(name):
+    current = st.session_state.draft_seasonings
+    if current and not current.endswith("\n"):
+        st.session_state.draft_seasonings += f"\n{name}, "
+    elif current:
+        st.session_state.draft_seasonings += f"{name}, "
+    else:
+        st.session_state.draft_seasonings = f"{name}, "
+
+
 # --- セッションステートの初期化 ---
+# 入力途中のテキストを保持するための準備
+if 'draft_name' not in st.session_state:
+    st.session_state.draft_name = ""
+if 'draft_foods' not in st.session_state:
+    st.session_state.draft_foods = ""
+if 'draft_seasonings' not in st.session_state:
+    st.session_state.draft_seasonings = ""
+if 'draft_instructions' not in st.session_state:
+    st.session_state.draft_instructions = ""
+
 if 'initialized' not in st.session_state:
     st.info("🔄 クラウドデータベース（スプレッドシート）と通信中...")
     saved_data = load_data()
@@ -64,25 +94,8 @@ if 'initialized' not in st.session_state:
         st.session_state.recipes = saved_data.get("recipes", [])
         st.session_state.inventory = saved_data.get("inventory", {})
     else:
-        st.session_state.recipes = [
-            {
-                "name": "豚の生姜焼き",
-                "foods": [
-                    {"name": "豚肉", "amount": "200g"},
-                    {"name": "玉ねぎ", "amount": "1/2個"}
-                ],
-                "seasonings": [
-                    {"name": "醤油", "amount": "大さじ2"},
-                    {"name": "みりん", "amount": "大さじ1"},
-                    {"name": "酒", "amount": "大さじ1"},
-                    {"name": "生姜（チューブ）", "amount": "3cm"}
-                ],
-                "instructions": "1. 玉ねぎをスライス\n2. 調味料を合わせる\n3. 豚肉を炒め、玉ねぎと調味料を加えて絡める"
-            }
-        ]
-        st.session_state.inventory = {
-            "醤油": True, "みりん": False, "酒": True, "生姜（チューブ）": False
-        }
+        st.session_state.recipes = []
+        st.session_state.inventory = {}
     st.session_state.initialized = True
     st.rerun()
 
@@ -101,7 +114,6 @@ with tab1:
     if not st.session_state.recipes:
         st.info("レシピが登録されていません。")
     else:
-        # ★ 変更点: 食材(foods)のみを検索候補としてリストアップする
         all_food_ingredients = set()
         for r in st.session_state.recipes:
             for f in r["foods"]:
@@ -114,22 +126,19 @@ with tab1:
             placeholder="例：豚肉、玉ねぎ..."
         )
         
-        # 絞り込み処理
         filtered_recipes = []
         for r in st.session_state.recipes:
             if not selected_search_ingredients:
                 filtered_recipes.append(r)
             else:
-                # レシピに含まれる食材(foods)のリストを作成
                 recipe_foods = [f["name"] for f in r["foods"]]
-                # 選択された食材がすべて含まれているかチェック
                 if all(ing in recipe_foods for ing in selected_search_ingredients):
                     filtered_recipes.append(r)
         
         st.divider()
         
         if not filtered_recipes:
-            st.warning("条件に合うレシピが見つかりませんでした。絞り込みを解除するか、別の食材を選んでください。")
+            st.warning("条件に合うレシピが見つかりませんでした。別の食材を選んでください。")
         else:
             recipe_names = [r["name"] for r in filtered_recipes]
             selected_name = st.selectbox("📝 レシピを選択:", recipe_names)
@@ -188,7 +197,6 @@ with tab1:
             st.subheader("📖 作り方")
             st.write(selected_recipe["instructions"])
 
-            # レシピの編集・削除
             st.divider()
             with st.expander("🛠️ このレシピを編集・削除する"):
                 st.subheader("✏️ レシピの編集")
@@ -235,7 +243,6 @@ with tab1:
                 if st.button("このレシピを削除する", type="primary"):
                     target_idx = next(i for i, r in enumerate(st.session_state.recipes) if r["name"] == selected_recipe["name"])
                     st.session_state.recipes.pop(target_idx)
-                    
                     save_data()
                     st.success(f"「{selected_recipe['name']}」を削除しました。")
                     st.rerun()
@@ -245,20 +252,59 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("新しいレシピを登録")
-    st.write("材料は **「名前, 分量」** とカンマで区切って、1行ずつ入力してください。")
+    st.write("材料は **「名前, 分量」** とカンマで区切って入力します。右のリストを押すと自動入力されます。")
     
-    with st.form("recipe_form"):
-        new_name = st.text_input("レシピ名", placeholder="例：カレーライス")
+    # 画面を「入力フォーム側」と「リスト側」の左右2列に分割
+    col_form, col_list = st.columns([2, 1])
+    
+    # ─── 右側：カンニングリスト ───
+    with col_list:
+        st.subheader("💡 登録済みリスト")
+        
+        all_food_names = set()
+        all_seasoning_names = set()
+        for r in st.session_state.recipes:
+            for f in r["foods"]:
+                all_food_names.add(f["name"])
+            for s in r["seasonings"]:
+                all_seasoning_names.add(s["name"])
+                
+        # 縦長になりすぎないようスクロール領域を作成
+        with st.container(height=550):
+            st.markdown("**🥩 食材**")
+            if not all_food_names:
+                st.caption("まだ登録されていません")
+            else:
+                for f_name in sorted(list(all_food_names)):
+                    # ボタンが押されたら自動入力関数を呼び出す
+                    st.button(f_name, key=f"btn_f_{f_name}", on_click=lambda name=f_name: add_food_to_draft(name))
+            
+            st.markdown("---")
+            st.markdown("**🧂 調味料**")
+            if not all_seasoning_names:
+                st.caption("まだ登録されていません")
+            else:
+                for s_name in sorted(list(all_seasoning_names)):
+                    st.button(s_name, key=f"btn_s_{s_name}", on_click=lambda name=s_name: add_seasoning_to_draft(name))
+
+    # ─── 左側：入力フォーム ───
+    with col_form:
+        # ※ 自動入力と連動させるため、st.formを使わずに直接ウィジェットを配置しています
+        st.text_input("レシピ名", placeholder="例：カレーライス", key="draft_name")
         
         st.markdown("---")
-        new_foods_raw = st.text_area("🥩 食材（毎回買うもの）", placeholder="豚肉, 200g\nじゃがいも, 2個\n玉ねぎ, 1個", height=100)
-        new_seasonings_raw = st.text_area("🧂 調味料（在庫管理するもの）", placeholder="カレールー, 1/2箱\nサラダ油, 大さじ1", height=100)
+        st.text_area("🥩 食材（毎回買うもの）", placeholder="豚肉, 200g\nじゃがいも, 2個", height=150, key="draft_foods")
+        st.text_area("🧂 調味料（在庫管理するもの）", placeholder="カレールー, 1/2箱", height=150, key="draft_seasonings")
         st.markdown("---")
-        new_instructions = st.text_area("作り方", placeholder="1. 野菜を切る\n2. 炒める\n3. 煮込む")
+        st.text_area("作り方", placeholder="1. 野菜を切る\n2. 炒める\n3. 煮込む", height=150, key="draft_instructions")
         
-        submit_button = st.form_submit_button("登録する")
-        
-        if submit_button:
+        # 登録ボタン
+        if st.button("登録する", type="primary"):
+            new_name = st.session_state.draft_name
+            new_foods_raw = st.session_state.draft_foods
+            new_seasonings_raw = st.session_state.draft_seasonings
+            new_instructions = st.session_state.draft_instructions
+            
             if new_name:
                 foods_list = parse_ingredients(new_foods_raw)
                 seasonings_list = parse_ingredients(new_seasonings_raw)
@@ -275,10 +321,18 @@ with tab2:
                         st.session_state.inventory[s["name"]] = False
                 
                 save_data()
-                        
+                
+                # 登録完了後に入力欄をリセット
+                st.session_state.draft_name = ""
+                st.session_state.draft_foods = ""
+                st.session_state.draft_seasonings = ""
+                st.session_state.draft_instructions = ""
+                
                 st.success(f"「{new_name}」を登録し、データを保存しました！")
+                st.rerun()
             else:
                 st.error("レシピ名は必須です。")
+
 
 # ==========================================
 # タブ3: 調味料の在庫管理
