@@ -37,70 +37,104 @@ with tab1:
     if not st.session_state.recipes:
         st.info("レシピが登録されていません。")
     else:
-        recipe_names = [r["name"] for r in st.session_state.recipes]
-        selected_name = st.selectbox("📝 レシピを選択:", recipe_names)
+        # --- 🔍 逆引き検索機能 ---
+        # 登録されている全レシピから、存在する食材・調味料のリストを抽出
+        all_ingredients = set()
+        for r in st.session_state.recipes:
+            for f in r["foods"]:
+                all_ingredients.add(f["name"])
+            for s in r["seasonings"]:
+                all_ingredients.add(s["name"])
         
-        selected_recipe = next(r for r in st.session_state.recipes if r["name"] == selected_name)
+        st.markdown("##### 🔍 使いたい食材で絞り込む（逆引き検索）")
+        selected_search_ingredients = st.multiselect(
+            "消費したい食材や調味料を選んでください",
+            options=sorted(list(all_ingredients)),
+            placeholder="例：豚肉、玉ねぎ..."
+        )
         
-        # --- 1. 買い物リスト ---
-        st.divider()
-        st.subheader("🛒 買い物リスト")
-        
-        foods_to_buy = [f"・{f['name']} （{f['amount']}）" for f in selected_recipe["foods"]]
-        
-        seasonings_to_buy = []
-        seasonings_in_stock = []
-        for s in selected_recipe["seasonings"]:
-            if st.session_state.inventory.get(s["name"], False):
-                seasonings_in_stock.append(f"・{s['name']} （{s['amount']}）")
+        # 絞り込みロジック（選択した食材がすべて含まれるレシピを残す）
+        filtered_recipes = []
+        for r in st.session_state.recipes:
+            if not selected_search_ingredients:
+                filtered_recipes.append(r)
             else:
-                seasonings_to_buy.append(f"・{s['name']} （{s['amount']}）")
-        
-        st.error("**【スーパーで買うもの】**")
-        if foods_to_buy:
-            st.markdown("**🥩 食材（毎回買う）**")
-            st.markdown("\n".join(foods_to_buy))
-            
-        if seasonings_to_buy:
-            st.markdown("**🧂 調味料（切らしている！）**")
-            st.markdown("\n".join(seasonings_to_buy))
-            
-        if not foods_to_buy and not seasonings_to_buy:
-            st.write("買うものはありません！")
-            
-        st.success("**【家にあるもの（買わなくてOK）】**")
-        if seasonings_in_stock:
-            st.markdown("\n".join(seasonings_in_stock))
-        else:
-            st.write("なし")
-
-        # --- 2. 材料一覧（新設） ---
-        st.divider()
-        st.subheader("📋 材料一覧")
-        
-        # 画面を2列に分けて食材と調味料を並べる
-        col_foods, col_seasonings = st.columns(2)
-        
-        with col_foods:
-            st.markdown("**🥩 食材**")
-            if selected_recipe["foods"]:
-                for f in selected_recipe["foods"]:
-                    st.write(f"・{f['name']} （{f['amount']}）")
-            else:
-                st.write("なし")
+                # このレシピに含まれるすべての材料名を取得
+                recipe_ingredients = [f["name"] for f in r["foods"]] + [s["name"] for s in r["seasonings"]]
                 
-        with col_seasonings:
-            st.markdown("**🧂 調味料**")
-            if selected_recipe["seasonings"]:
-                for s in selected_recipe["seasonings"]:
-                    st.write(f"・{s['name']} （{s['amount']}）")
+                # 検索条件の食材が「すべて」含まれているかチェック
+                if all(ing in recipe_ingredients for ing in selected_search_ingredients):
+                    filtered_recipes.append(r)
+        
+        st.divider()
+        
+        # --- レシピ選択・表示 ---
+        if not filtered_recipes:
+            st.warning("条件に合うレシピが見つかりませんでした。絞り込みを解除するか、別の食材を選んでください。")
+        else:
+            recipe_names = [r["name"] for r in filtered_recipes]
+            selected_name = st.selectbox("📝 レシピを選択:", recipe_names)
+            
+            selected_recipe = next(r for r in filtered_recipes if r["name"] == selected_name)
+            
+            # --- 1. 買い物リスト ---
+            st.divider()
+            st.subheader("🛒 買い物リスト")
+            
+            foods_to_buy = [f"・{f['name']} （{f['amount']}）" for f in selected_recipe["foods"]]
+            
+            seasonings_to_buy = []
+            seasonings_in_stock = []
+            for s in selected_recipe["seasonings"]:
+                if st.session_state.inventory.get(s["name"], False):
+                    seasonings_in_stock.append(f"・{s['name']} （{s['amount']}）")
+                else:
+                    seasonings_to_buy.append(f"・{s['name']} （{s['amount']}）")
+            
+            st.error("**【スーパーで買うもの】**")
+            if foods_to_buy:
+                st.markdown("**🥩 食材（毎回買う）**")
+                st.markdown("\n".join(foods_to_buy))
+                
+            if seasonings_to_buy:
+                st.markdown("**🧂 調味料（切らしている！）**")
+                st.markdown("\n".join(seasonings_to_buy))
+                
+            if not foods_to_buy and not seasonings_to_buy:
+                st.write("買うものはありません！")
+                
+            st.success("**【家にあるもの（買わなくてOK）】**")
+            if seasonings_in_stock:
+                st.markdown("\n".join(seasonings_in_stock))
             else:
                 st.write("なし")
 
-        # --- 3. 作り方 ---
-        st.divider()
-        st.subheader("📖 作り方")
-        st.write(selected_recipe["instructions"])
+            # --- 2. 材料一覧 ---
+            st.divider()
+            st.subheader("📋 材料一覧")
+            
+            col_foods, col_seasonings = st.columns(2)
+            
+            with col_foods:
+                st.markdown("**🥩 食材**")
+                if selected_recipe["foods"]:
+                    for f in selected_recipe["foods"]:
+                        st.write(f"・{f['name']} （{f['amount']}）")
+                else:
+                    st.write("なし")
+                    
+            with col_seasonings:
+                st.markdown("**🧂 調味料**")
+                if selected_recipe["seasonings"]:
+                    for s in selected_recipe["seasonings"]:
+                        st.write(f"・{s['name']} （{s['amount']}）")
+                else:
+                    st.write("なし")
+
+            # --- 3. 作り方 ---
+            st.divider()
+            st.subheader("📖 作り方")
+            st.write(selected_recipe["instructions"])
 
 
 # ==========================================
