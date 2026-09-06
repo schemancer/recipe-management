@@ -1,30 +1,33 @@
 import streamlit as st
 
-# ページ設定
 st.set_page_config(page_title="レシピ＆お買い物マネージャー", layout="centered")
 
 # --- セッションステートの初期化 ---
-# アプリをリロードしてもデータを保持するための初期設定
 if 'recipes' not in st.session_state:
     st.session_state.recipes = [
         {
             "name": "豚の生姜焼き",
-            "ingredients": ["豚肉", "玉ねぎ", "醤油", "みりん", "酒", "生姜"],
+            "foods": [
+                {"name": "豚肉", "amount": "200g"},
+                {"name": "玉ねぎ", "amount": "1/2個"}
+            ],
+            "seasonings": [
+                {"name": "醤油", "amount": "大さじ2"},
+                {"name": "みりん", "amount": "大さじ1"},
+                {"name": "酒", "amount": "大さじ1"},
+                {"name": "生姜（チューブ）", "amount": "3cm"}
+            ],
             "instructions": "1. 玉ねぎをスライス\n2. 調味料を合わせる\n3. 豚肉を炒め、玉ねぎと調味料を加えて絡める"
         }
     ]
 if 'inventory' not in st.session_state:
-    # True = 家にある, False = 家にない（買う必要がある）
     st.session_state.inventory = {
-        "豚肉": False, "玉ねぎ": True, "醤油": True, 
-        "みりん": False, "酒": True, "生姜": False
+        "醤油": True, "みりん": False, "酒": True, "生姜（チューブ）": False
     }
 
-# --- タイトル ---
 st.title("🍳 レシピ＆お買い物マネージャー")
 
-# --- タブの作成 ---
-tab1, tab2, tab3 = st.tabs(["レシピ一覧（買い物リスト）", "レシピの登録", "材料管理（家の在庫）"])
+tab1, tab2, tab3 = st.tabs(["レシピ一覧（買い物リスト）", "レシピの登録", "調味料の在庫管理"])
 
 # ==========================================
 # タブ1: レシピ一覧（スーパーで見る画面）
@@ -32,40 +35,69 @@ tab1, tab2, tab3 = st.tabs(["レシピ一覧（買い物リスト）", "レシ�
 with tab1:
     st.header("今日作るレシピを選ぶ")
     if not st.session_state.recipes:
-        st.info("レシピが登録されていません。「レシピの登録」タブから追加してください。")
+        st.info("レシピが登録されていません。")
     else:
-        # 登録されているレシピ名リストを取得
         recipe_names = [r["name"] for r in st.session_state.recipes]
         selected_name = st.selectbox("📝 レシピを選択:", recipe_names)
         
-        # 選択されたレシピのデータを取得
         selected_recipe = next(r for r in st.session_state.recipes if r["name"] == selected_name)
         
+        # --- 1. 買い物リスト ---
         st.divider()
         st.subheader("🛒 買い物リスト")
         
-        buy_list = []
-        in_stock_list = []
+        foods_to_buy = [f"・{f['name']} （{f['amount']}）" for f in selected_recipe["foods"]]
         
-        # 材料の在庫チェック
-        for ing in selected_recipe["ingredients"]:
-            # 家にあるかチェック（デフォルトはFalse:ない）
-            is_in_stock = st.session_state.inventory.get(ing, False)
-            if is_in_stock:
-                in_stock_list.append(ing)
+        seasonings_to_buy = []
+        seasonings_in_stock = []
+        for s in selected_recipe["seasonings"]:
+            if st.session_state.inventory.get(s["name"], False):
+                seasonings_in_stock.append(f"・{s['name']} （{s['amount']}）")
             else:
-                buy_list.append(ing)
+                seasonings_to_buy.append(f"・{s['name']} （{s['amount']}）")
         
-        # 不足しているもの（買うもの）を強調表示
-        if buy_list:
-            st.error(f"**【スーパーで買うもの】**\n\n" + " / ".join(buy_list))
-        else:
-            st.success("✨ 必要な材料はすべて家にあります！買わなくてOK！")
+        st.error("**【スーパーで買うもの】**")
+        if foods_to_buy:
+            st.markdown("**🥩 食材（毎回買う）**")
+            st.markdown("\n".join(foods_to_buy))
             
-        # 家にあるもの
-        if in_stock_list:
-            st.info(f"**【家にあるもの】**\n\n" + " / ".join(in_stock_list))
+        if seasonings_to_buy:
+            st.markdown("**🧂 調味料（切らしている！）**")
+            st.markdown("\n".join(seasonings_to_buy))
+            
+        if not foods_to_buy and not seasonings_to_buy:
+            st.write("買うものはありません！")
+            
+        st.success("**【家にあるもの（買わなくてOK）】**")
+        if seasonings_in_stock:
+            st.markdown("\n".join(seasonings_in_stock))
+        else:
+            st.write("なし")
 
+        # --- 2. 材料一覧（新設） ---
+        st.divider()
+        st.subheader("📋 材料一覧")
+        
+        # 画面を2列に分けて食材と調味料を並べる
+        col_foods, col_seasonings = st.columns(2)
+        
+        with col_foods:
+            st.markdown("**🥩 食材**")
+            if selected_recipe["foods"]:
+                for f in selected_recipe["foods"]:
+                    st.write(f"・{f['name']} （{f['amount']}）")
+            else:
+                st.write("なし")
+                
+        with col_seasonings:
+            st.markdown("**🧂 調味料**")
+            if selected_recipe["seasonings"]:
+                for s in selected_recipe["seasonings"]:
+                    st.write(f"・{s['name']} （{s['amount']}）")
+            else:
+                st.write("なし")
+
+        # --- 3. 作り方 ---
         st.divider()
         st.subheader("📖 作り方")
         st.write(selected_recipe["instructions"])
@@ -76,62 +108,78 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("新しいレシピを登録")
+    st.write("材料は **「名前, 分量」** とカンマで区切って、1行ずつ入力してください。")
+    
     with st.form("recipe_form"):
         new_name = st.text_input("レシピ名", placeholder="例：カレーライス")
-        new_ingredients_raw = st.text_area("材料（カンマ「,」区切りで入力）", placeholder="例：豚肉, じゃがいも, 人参, 玉ねぎ, カレールー")
+        
+        st.markdown("---")
+        new_foods_raw = st.text_area(
+            "🥩 食材（毎回買うもの）", 
+            placeholder="豚肉, 200g\nじゃがいも, 2個\n玉ねぎ, 1個",
+            height=100
+        )
+        new_seasonings_raw = st.text_area(
+            "🧂 調味料（在庫管理するもの）", 
+            placeholder="カレールー, 1/2箱\nサラダ油, 大さじ1",
+            height=100
+        )
+        st.markdown("---")
         new_instructions = st.text_area("作り方", placeholder="1. 野菜を切る\n2. 炒める\n3. 煮込む")
         
         submit_button = st.form_submit_button("登録する")
         
         if submit_button:
-            if new_name and new_ingredients_raw:
-                # カンマ区切りの文字列をリストに変換し、空白を削除
-                ing_list = [x.strip() for x in new_ingredients_raw.split(',') if x.strip()]
+            if new_name:
+                def parse_ingredients(raw_text):
+                    result = []
+                    for line in raw_text.strip().split('\n'):
+                        if line.strip():
+                            parts = line.split(',')
+                            name = parts[0].strip()
+                            amount = parts[1].strip() if len(parts) > 1 else "適量"
+                            result.append({"name": name, "amount": amount})
+                    return result
                 
-                # レシピを追加
+                foods_list = parse_ingredients(new_foods_raw)
+                seasonings_list = parse_ingredients(new_seasonings_raw)
+                
                 st.session_state.recipes.append({
                     "name": new_name,
-                    "ingredients": ing_list,
+                    "foods": foods_list,
+                    "seasonings": seasonings_list,
                     "instructions": new_instructions
                 })
                 
-                # 新しい材料を在庫リストに追加（デフォルトは「ない(False)」に設定）
-                for ing in ing_list:
-                    if ing not in st.session_state.inventory:
-                        st.session_state.inventory[ing] = False
+                for s in seasonings_list:
+                    if s["name"] not in st.session_state.inventory:
+                        st.session_state.inventory[s["name"]] = False
                         
                 st.success(f"「{new_name}」を登録しました！")
             else:
-                st.error("レシピ名と材料は必須です。")
+                st.error("レシピ名は必須です。")
 
 
 # ==========================================
-# タブ3: 材料管理（家の在庫）
+# タブ3: 調味料の在庫管理
 # ==========================================
 with tab3:
-    st.header("🏠 家にあるもの管理")
+    st.header("🏠 調味料の在庫管理")
     st.write("チェックが入っているものは「家にある」、外れているものは「切らしている（買う必要がある）」状態です。")
     
     if not st.session_state.inventory:
-        st.info("管理する材料がありません。レシピを登録すると自動で追加されます。")
+        st.info("管理する調味料がありません。レシピを登録すると自動で追加されます。")
     else:
-        # 検索フィルター
-        search_query = st.text_input("材料を検索", "")
+        search_query = st.text_input("調味料を検索", "")
         
-        # 2カラムで表示して画面をスッキリさせる
         col1, col2 = st.columns(2)
+        sorted_seasonings = sorted(st.session_state.inventory.keys())
         
-        # 在庫のリストをアルファベット・五十音順等にソートして表示
-        sorted_ingredients = sorted(st.session_state.inventory.keys())
-        
-        for i, ing in enumerate(sorted_ingredients):
-            # 検索フィルターに引っかからないものはスキップ
+        for i, ing in enumerate(sorted_seasonings):
             if search_query and search_query not in ing:
                 continue
                 
-            # 交互にカラムに配置
             with col1 if i % 2 == 0 else col2:
-                # チェックボックスの状態が変わったらセッションステートを更新
                 current_status = st.session_state.inventory[ing]
                 new_status = st.checkbox(ing, value=current_status, key=f"inv_{ing}")
                 if new_status != current_status:
