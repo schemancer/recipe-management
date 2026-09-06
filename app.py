@@ -40,7 +40,6 @@ def save_data():
         st.error(f"データの保存に失敗しました: {e}")
 
 def parse_ingredients(raw_text):
-    """テキストエリアの文字列をリストに変換する関数"""
     result = []
     for line in raw_text.strip().split('\n'):
         if line.strip():
@@ -51,7 +50,6 @@ def parse_ingredients(raw_text):
     return result
 
 def unparse_ingredients(ing_list):
-    """リストをテキストエリア表示用の文字列に戻す関数"""
     lines = []
     for ing in ing_list:
         lines.append(f"{ing['name']}, {ing['amount']}")
@@ -103,27 +101,29 @@ with tab1:
     if not st.session_state.recipes:
         st.info("レシピが登録されていません。")
     else:
-        all_ingredients = set()
+        # ★ 変更点: 食材(foods)のみを検索候補としてリストアップする
+        all_food_ingredients = set()
         for r in st.session_state.recipes:
             for f in r["foods"]:
-                all_ingredients.add(f["name"])
-            for s in r["seasonings"]:
-                all_ingredients.add(s["name"])
+                all_food_ingredients.add(f["name"])
         
         st.markdown("##### 🔍 使いたい食材で絞り込む（逆引き検索）")
         selected_search_ingredients = st.multiselect(
-            "消費したい食材や調味料を選んでください",
-            options=sorted(list(all_ingredients)),
+            "消費したい食材を選んでください",
+            options=sorted(list(all_food_ingredients)),
             placeholder="例：豚肉、玉ねぎ..."
         )
         
+        # 絞り込み処理
         filtered_recipes = []
         for r in st.session_state.recipes:
             if not selected_search_ingredients:
                 filtered_recipes.append(r)
             else:
-                recipe_ingredients = [f["name"] for f in r["foods"]] + [s["name"] for s in r["seasonings"]]
-                if all(ing in recipe_ingredients for ing in selected_search_ingredients):
+                # レシピに含まれる食材(foods)のリストを作成
+                recipe_foods = [f["name"] for f in r["foods"]]
+                # 選択された食材がすべて含まれているかチェック
+                if all(ing in recipe_foods for ing in selected_search_ingredients):
                     filtered_recipes.append(r)
         
         st.divider()
@@ -188,16 +188,13 @@ with tab1:
             st.subheader("📖 作り方")
             st.write(selected_recipe["instructions"])
 
-            # ---------------------------------------------
-            # ★新規追加：レシピの編集と削除エリア
-            # ---------------------------------------------
+            # レシピの編集・削除
             st.divider()
             with st.expander("🛠️ このレシピを編集・削除する"):
                 st.subheader("✏️ レシピの編集")
                 with st.form(key=f"edit_form_{selected_recipe['name']}"):
                     edit_name = st.text_input("レシピ名", value=selected_recipe["name"])
                     
-                    # リストからテキスト入力用に変換
                     foods_text = unparse_ingredients(selected_recipe["foods"])
                     seasonings_text = unparse_ingredients(selected_recipe["seasonings"])
                     
@@ -211,11 +208,9 @@ with tab1:
                     
                     if update_button:
                         if edit_name:
-                            # 1. 入力内容を解析
                             foods_list = parse_ingredients(edit_foods_raw)
                             seasonings_list = parse_ingredients(edit_seasonings_raw)
                             
-                            # 2. 該当レシピのインデックスを探して上書き
                             target_idx = next(i for i, r in enumerate(st.session_state.recipes) if r["name"] == selected_recipe["name"])
                             st.session_state.recipes[target_idx] = {
                                 "name": edit_name,
@@ -224,12 +219,10 @@ with tab1:
                                 "instructions": edit_instructions
                             }
                             
-                            # 3. 新しい調味料があれば在庫リストに追加
                             for s in seasonings_list:
                                 if s["name"] not in st.session_state.inventory:
                                     st.session_state.inventory[s["name"]] = False
                             
-                            # 4. スプレッドシートに保存して画面をリロード
                             save_data()
                             st.success("レシピを更新しました！")
                             st.rerun()
@@ -240,11 +233,9 @@ with tab1:
                 st.subheader("🗑️ レシピの削除")
                 st.warning("この操作は取り消せません。")
                 if st.button("このレシピを削除する", type="primary"):
-                    # 該当レシピを探して削除
                     target_idx = next(i for i, r in enumerate(st.session_state.recipes) if r["name"] == selected_recipe["name"])
                     st.session_state.recipes.pop(target_idx)
                     
-                    # 保存してリロード
                     save_data()
                     st.success(f"「{selected_recipe['name']}」を削除しました。")
                     st.rerun()
