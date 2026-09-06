@@ -1,44 +1,81 @@
 import streamlit as st
+import requests
+import json
 
 st.set_page_config(page_title="レシピ＆お買い物マネージャー", layout="centered")
 
-# --- セッションステートの初期化 ---
-if 'recipes' not in st.session_state:
-    st.session_state.recipes = [
-        {
-            "name": "豚の生姜焼き",
-            "foods": [
-                {"name": "豚肉", "amount": "200g"},
-                {"name": "玉ねぎ", "amount": "1/2個"}
-            ],
-            "seasonings": [
-                {"name": "醤油", "amount": "大さじ2"},
-                {"name": "みりん", "amount": "大さじ1"},
-                {"name": "酒", "amount": "大さじ1"},
-                {"name": "生姜（チューブ）", "amount": "3cm"}
-            ],
-            "instructions": "1. 玉ねぎをスライス\n2. 調味料を合わせる\n3. 豚肉を炒め、玉ねぎと調味料を加えて絡める"
-        }
-    ]
-if 'inventory' not in st.session_state:
-    st.session_state.inventory = {
-        "醤油": True, "みりん": False, "酒": True, "生姜（チューブ）": False
-    }
+# ==========================================
+# ⚠️ 注意: 以下の "" の中に、先ほど取得したGASのURLを貼り付けてください
+# ==========================================
+GAS_URL = "https://script.google.com/macros/s/AKfycbxPyDnc_ey2LLrGd9TZsRz6Q46zq2UXkNNohB6fozgijvGQtGahsmMXfHI3289-PRL9mg/exec"
 
+def load_data():
+    """GAS経由でスプレッドシートからデータを読み込む"""
+    try:
+        response = requests.get(GAS_URL)
+        data = response.json()
+        if data:
+            return data
+    except Exception as e:
+        st.error(f"データの読み込みに失敗しました: {e}")
+    return None
+
+def save_data():
+    """GAS経由でスプレッドシートにデータを保存する"""
+    data_to_save = {
+        "recipes": st.session_state.recipes,
+        "inventory": st.session_state.inventory
+    }
+    try:
+        # データをJSON文字列に変換して送信
+        requests.post(GAS_URL, data=json.dumps(data_to_save, ensure_ascii=False))
+    except Exception as e:
+        st.error(f"データの保存に失敗しました: {e}")
+
+# --- セッションステートの初期化 ---
+if 'initialized' not in st.session_state:
+    st.info("🔄 クラウドデータベース（スプレッドシート）と通信中...")
+    saved_data = load_data()
+    
+    # スプレッドシートにデータがある場合は復元、ない場合は初期データを入れる
+    if saved_data and "recipes" in saved_data:
+        st.session_state.recipes = saved_data.get("recipes", [])
+        st.session_state.inventory = saved_data.get("inventory", {})
+    else:
+        st.session_state.recipes = [
+            {
+                "name": "豚の生姜焼き",
+                "foods": [
+                    {"name": "豚肉", "amount": "200g"},
+                    {"name": "玉ねぎ", "amount": "1/2個"}
+                ],
+                "seasonings": [
+                    {"name": "醤油", "amount": "大さじ2"},
+                    {"name": "みりん", "amount": "大さじ1"},
+                    {"name": "酒", "amount": "大さじ1"},
+                    {"name": "生姜（チューブ）", "amount": "3cm"}
+                ],
+                "instructions": "1. 玉ねぎをスライス\n2. 調味料を合わせる\n3. 豚肉を炒め、玉ねぎと調味料を加えて絡める"
+            }
+        ]
+        st.session_state.inventory = {
+            "醤油": True, "みりん": False, "酒": True, "生姜（チューブ）": False
+        }
+    st.session_state.initialized = True
+    st.rerun() # 読み込み完了後に画面をリフレッシュ
+
+# ---------------------------------------------
+# 画面の表示レイアウト（前回から変更なし）
+# ---------------------------------------------
 st.title("🍳 レシピ＆お買い物マネージャー")
 
 tab1, tab2, tab3 = st.tabs(["レシピ一覧（買い物リスト）", "レシピの登録", "調味料の在庫管理"])
 
-# ==========================================
-# タブ1: レシピ一覧（スーパーで見る画面）
-# ==========================================
 with tab1:
     st.header("今日作るレシピを選ぶ")
     if not st.session_state.recipes:
         st.info("レシピが登録されていません。")
     else:
-        # --- 🔍 逆引き検索機能 ---
-        # 登録されている全レシピから、存在する食材・調味料のリストを抽出
         all_ingredients = set()
         for r in st.session_state.recipes:
             for f in r["foods"]:
@@ -53,22 +90,17 @@ with tab1:
             placeholder="例：豚肉、玉ねぎ..."
         )
         
-        # 絞り込みロジック（選択した食材がすべて含まれるレシピを残す）
         filtered_recipes = []
         for r in st.session_state.recipes:
             if not selected_search_ingredients:
                 filtered_recipes.append(r)
             else:
-                # このレシピに含まれるすべての材料名を取得
                 recipe_ingredients = [f["name"] for f in r["foods"]] + [s["name"] for s in r["seasonings"]]
-                
-                # 検索条件の食材が「すべて」含まれているかチェック
                 if all(ing in recipe_ingredients for ing in selected_search_ingredients):
                     filtered_recipes.append(r)
         
         st.divider()
         
-        # --- レシピ選択・表示 ---
         if not filtered_recipes:
             st.warning("条件に合うレシピが見つかりませんでした。絞り込みを解除するか、別の食材を選んでください。")
         else:
@@ -77,7 +109,6 @@ with tab1:
             
             selected_recipe = next(r for r in filtered_recipes if r["name"] == selected_name)
             
-            # --- 1. 買い物リスト ---
             st.divider()
             st.subheader("🛒 買い物リスト")
             
@@ -95,11 +126,9 @@ with tab1:
             if foods_to_buy:
                 st.markdown("**🥩 食材（毎回買う）**")
                 st.markdown("\n".join(foods_to_buy))
-                
             if seasonings_to_buy:
                 st.markdown("**🧂 調味料（切らしている！）**")
                 st.markdown("\n".join(seasonings_to_buy))
-                
             if not foods_to_buy and not seasonings_to_buy:
                 st.write("買うものはありません！")
                 
@@ -109,12 +138,10 @@ with tab1:
             else:
                 st.write("なし")
 
-            # --- 2. 材料一覧 ---
             st.divider()
             st.subheader("📋 材料一覧")
             
             col_foods, col_seasonings = st.columns(2)
-            
             with col_foods:
                 st.markdown("**🥩 食材**")
                 if selected_recipe["foods"]:
@@ -122,7 +149,6 @@ with tab1:
                         st.write(f"・{f['name']} （{f['amount']}）")
                 else:
                     st.write("なし")
-                    
             with col_seasonings:
                 st.markdown("**🧂 調味料**")
                 if selected_recipe["seasonings"]:
@@ -131,15 +157,10 @@ with tab1:
                 else:
                     st.write("なし")
 
-            # --- 3. 作り方 ---
             st.divider()
             st.subheader("📖 作り方")
             st.write(selected_recipe["instructions"])
 
-
-# ==========================================
-# タブ2: レシピの登録
-# ==========================================
 with tab2:
     st.header("新しいレシピを登録")
     st.write("材料は **「名前, 分量」** とカンマで区切って、1行ずつ入力してください。")
@@ -148,16 +169,8 @@ with tab2:
         new_name = st.text_input("レシピ名", placeholder="例：カレーライス")
         
         st.markdown("---")
-        new_foods_raw = st.text_area(
-            "🥩 食材（毎回買うもの）", 
-            placeholder="豚肉, 200g\nじゃがいも, 2個\n玉ねぎ, 1個",
-            height=100
-        )
-        new_seasonings_raw = st.text_area(
-            "🧂 調味料（在庫管理するもの）", 
-            placeholder="カレールー, 1/2箱\nサラダ油, 大さじ1",
-            height=100
-        )
+        new_foods_raw = st.text_area("🥩 食材（毎回買うもの）", placeholder="豚肉, 200g\nじゃがいも, 2個\n玉ねぎ, 1個", height=100)
+        new_seasonings_raw = st.text_area("🧂 調味料（在庫管理するもの）", placeholder="カレールー, 1/2箱\nサラダ油, 大さじ1", height=100)
         st.markdown("---")
         new_instructions = st.text_area("作り方", placeholder="1. 野菜を切る\n2. 炒める\n3. 煮込む")
         
@@ -188,15 +201,14 @@ with tab2:
                 for s in seasonings_list:
                     if s["name"] not in st.session_state.inventory:
                         st.session_state.inventory[s["name"]] = False
+                
+                # ★ここでスプレッドシートに保存！
+                save_data()
                         
-                st.success(f"「{new_name}」を登録しました！")
+                st.success(f"「{new_name}」を登録し、データを保存しました！")
             else:
                 st.error("レシピ名は必須です。")
 
-
-# ==========================================
-# タブ3: 調味料の在庫管理
-# ==========================================
 with tab3:
     st.header("🏠 調味料の在庫管理")
     st.write("チェックが入っているものは「家にある」、外れているものは「切らしている（買う必要がある）」状態です。")
@@ -205,7 +217,6 @@ with tab3:
         st.info("管理する調味料がありません。レシピを登録すると自動で追加されます。")
     else:
         search_query = st.text_input("調味料を検索", "")
-        
         col1, col2 = st.columns(2)
         sorted_seasonings = sorted(st.session_state.inventory.keys())
         
@@ -216,5 +227,9 @@ with tab3:
             with col1 if i % 2 == 0 else col2:
                 current_status = st.session_state.inventory[ing]
                 new_status = st.checkbox(ing, value=current_status, key=f"inv_{ing}")
+                
                 if new_status != current_status:
                     st.session_state.inventory[ing] = new_status
+                    # ★ここでスプレッドシートに保存！
+                    save_data()
+                    st.rerun()
